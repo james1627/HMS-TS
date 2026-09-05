@@ -1,37 +1,350 @@
-import "./index.css";
-import { useEffect, useState } from "react";
-import { AuthView, Dashboard, Header, ProjectDetail, ProjectForm, ProjectsView, ReceiptForm, ReceiptView, Sidebar } from "./components/ProjectVault";
-import { seedDemoUser, storage } from "./storage";
-import type { Project, ProjectStatus, Receipt, User } from "./types";
+import './index.css';
+import { useState } from 'react';
+import {
+  AuthView,
+  Dashboard,
+  Header,
+  ProjectDetail,
+  ProjectForm,
+  ProjectsView,
+  ReceiptForm,
+  ReceiptView,
+  Sidebar,
+} from './components/ProjectVault';
+import { seedDemoUser, storage } from './storage';
+import type { Project, ProjectStatus, Receipt, User } from './types';
 
-type View = "dashboard" | "projects" | "project-detail";
-type Modal = "project" | "receipt" | "view-receipt" | null;
+type View = 'dashboard' | 'projects' | 'project-detail';
+
+type Modal =
+  | null
+  | { type: 'project'; projectId?: string }
+  | { type: 'receipt' }
+  | { type: 'view-receipt'; receiptId: string };
+
+type UIState = {
+  view: View;
+  projectId?: string;
+  modal: Modal;
+  filter: ProjectStatus | 'all';
+  search: string;
+  sidebarOpen: boolean;
+};
+
+const initialUIState: UIState = {
+  view: 'dashboard',
+  projectId: undefined,
+  modal: null,
+  filter: 'all',
+  search: '',
+  sidebarOpen: false,
+};
 
 export function App() {
-  const [user, setUser] = useState<User | null>(() => { seedDemoUser(); return storage.currentUser(); });
+  const [user, setUser] = useState<User | null>(() => {
+    seedDemoUser();
+    return storage.currentUser();
+  });
+
   const [register, setRegister] = useState(false);
-  const [view, setView] = useState<View>("dashboard");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selected, setSelected] = useState<Project | null>(null);
-  const [modal, setModal] = useState<Modal>(null);
-  const [editing, setEditing] = useState<Project>();
-  const [viewingReceipt, setViewingReceipt] = useState<Receipt | null>(null);
-  const [filter, setFilter] = useState<ProjectStatus | "all">("all");
-  const [search, setSearch] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  useEffect(() => { const toggle = () => setRegister(value => !value); window.addEventListener("toggle-auth", toggle); return () => window.removeEventListener("toggle-auth", toggle); }, []);
-  useEffect(() => { if (user) setProjects(storage.projects(user.id)); }, [user]);
-  if (!user) return <AuthView register={register} onLogin={(email, password) => { const found = storage.users().find(item => item.email === email && item.password === password); if (found) { storage.saveCurrentUser(found); setUser(found); } else window.alert("Invalid email or password"); }} onRegister={(name, email, password) => { if (storage.users().some(item => item.email === email)) return window.alert("Email already registered"); const created = { id: `u_${Date.now()}`, name, email, password }; storage.saveUsers([...storage.users(), created]); storage.saveCurrentUser(created); setUser(created); }} />;
+  const [ui, setUI] = useState<UIState>(initialUIState);
 
-  const receipts = selected ? storage.receipts(user.id, selected.id) : [];
-  const saveProject = (data: Omit<Project, "id" | "createdAt">) => { const updated = editing ? projects.map(project => project.id === editing.id ? { ...editing, ...data } : project) : [...projects, { ...data, id: `p_${Date.now()}`, createdAt: new Date().toISOString() }]; setProjects(updated); storage.saveProjects(user.id, updated); setModal(null); setEditing(undefined); };
-  const addReceipt = (data: Omit<Receipt, "id" | "createdAt">) => { if (!selected) return; storage.saveReceipts(user.id, selected.id, [...receipts, { ...data, id: `r_${Date.now()}`, createdAt: new Date().toISOString() }]); setModal(null); };
-  const deleteProject = () => { if (!selected || !window.confirm("Delete this project and all its receipts?")) return; const updated = projects.filter(project => project.id !== selected.id); setProjects(updated); storage.saveProjects(user.id, updated); storage.deleteReceipts(user.id, selected.id); setSelected(null); setView("projects"); };
-  const title = view === "project-detail" ? selected?.name ?? "Project" : view === "dashboard" ? "Dashboard" : "Projects";
-  const openProject = (project: Project) => { setSelected(project); setView("project-detail"); };
-  const openNewProject = () => { setEditing(undefined); setModal("project"); };
-  return <div className="app-shell"><Sidebar user={user} view={view} open={sidebarOpen} onToggle={() => setSidebarOpen(false)} onNavigate={next => { setView(next); setSidebarOpen(false); }} onLogout={() => { storage.saveCurrentUser(null); setUser(null); }} /><div className="app-content"><Header title={title} onMenu={() => setSidebarOpen(true)} onAdd={view === "projects" ? openNewProject : undefined} /><main>{view === "dashboard" && <Dashboard projects={projects} receiptCount={id => storage.receipts(user.id, id).length} onProject={openProject} onAdd={openNewProject} onProjects={() => setView("projects")} />}{view === "projects" && <ProjectsView projects={projects} filter={filter} search={search} onFilter={setFilter} onSearch={setSearch} receiptCount={id => storage.receipts(user.id, id).length} spent={id => storage.receipts(user.id, id).reduce((sum, receipt) => sum + receipt.amount, 0)} onProject={openProject} onAdd={openNewProject} />}{view === "project-detail" && selected && <ProjectDetail project={selected} receipts={receipts} onBack={() => setView("projects")} onEdit={() => { setEditing(selected); setModal("project"); }} onDelete={deleteProject} onAddReceipt={() => setModal("receipt")} onReceipt={receipt => { setViewingReceipt(receipt); setModal("view-receipt"); }} />}</main></div>{modal === "project" && <ProjectForm project={editing} onSubmit={saveProject} onClose={() => setModal(null)} />}{modal === "receipt" && <ReceiptForm onSubmit={addReceipt} onClose={() => setModal(null)} />}{modal === "view-receipt" && viewingReceipt && <ReceiptView receipt={viewingReceipt} onClose={() => setModal(null)} onDelete={() => { if (!selected || !window.confirm("Delete this receipt?")) return; storage.saveReceipts(user.id, selected.id, receipts.filter(receipt => receipt.id !== viewingReceipt.id)); setModal(null); }} />}</div>;
+  const [projects, setProjects] = useState<Project[]>(() =>
+    user ? storage.projects(user.id) : [],
+  );
+
+  // --------------------------------------------------
+  // Derived data
+  // --------------------------------------------------
+
+  const selected = projects.find((project) => project.id === ui.projectId) ?? null;
+
+  const editing =
+    ui.modal && ui.modal.type === 'project' && ui.modal.projectId
+      ? projects.find((project) => project.id === ui.modal.projectId)
+      : undefined;
+
+  const receipts = selected ? storage.receipts(user!.id, selected.id) : [];
+
+  const viewingReceipt =
+    ui.modal && ui.modal.type === 'view-receipt'
+      ? (receipts.find((receipt) => receipt.id === ui.modal.receiptId) ?? null)
+      : null;
+
+  const title =
+    ui.view === 'project-detail'
+      ? (selected?.name ?? 'Project')
+      : ui.view === 'dashboard'
+        ? 'Dashboard'
+        : 'Projects';
+
+  // --------------------------------------------------
+  // UI helpers
+  // --------------------------------------------------
+
+  const updateUI = (changes: Partial<UIState>) => {
+    setUI((current) => ({
+      ...current,
+      ...changes,
+    }));
+  };
+
+  const openProject = (project: Project) => {
+    updateUI({
+      view: 'project-detail',
+      projectId: project.id,
+    });
+  };
+
+  const openNewProject = () => {
+    updateUI({
+      modal: { type: 'project' },
+    });
+  };
+
+  const closeModal = () => {
+    updateUI({
+      modal: null,
+    });
+  };
+
+  // --------------------------------------------------
+  // Project actions
+  // --------------------------------------------------
+
+  const saveProject = (data: Omit<Project, 'id' | 'createdAt'>) => {
+    if (!user) return;
+
+    const updated = editing
+      ? projects.map((project) => (project.id === editing.id ? { ...editing, ...data } : project))
+      : [
+          ...projects,
+          {
+            ...data,
+            id: `p_${Date.now()}`,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+
+    setProjects(updated);
+    storage.saveProjects(user.id, updated);
+
+    closeModal();
+  };
+
+  const deleteProject = () => {
+    if (!user || !selected) return;
+
+    if (!window.confirm('Delete this project and all its receipts?')) {
+      return;
+    }
+
+    const updated = projects.filter((project) => project.id !== selected.id);
+
+    setProjects(updated);
+    storage.saveProjects(user.id, updated);
+    storage.deleteReceipts(user.id, selected.id);
+
+    updateUI({
+      view: 'projects',
+      projectId: undefined,
+    });
+  };
+
+  // --------------------------------------------------
+  // Receipt actions
+  // --------------------------------------------------
+
+  const addReceipt = (data: Omit<Receipt, 'id' | 'createdAt'>) => {
+    if (!user || !selected) return;
+
+    const updatedReceipts = [
+      ...receipts,
+      {
+        ...data,
+        id: `r_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    storage.saveReceipts(user.id, selected.id, updatedReceipts);
+
+    closeModal();
+  };
+
+  const deleteReceipt = () => {
+    if (!user || !selected || !viewingReceipt) return;
+
+    if (!window.confirm('Delete this receipt?')) {
+      return;
+    }
+
+    const updatedReceipts = receipts.filter((receipt) => receipt.id !== viewingReceipt.id);
+
+    storage.saveReceipts(user.id, selected.id, updatedReceipts);
+
+    closeModal();
+  };
+
+  // --------------------------------------------------
+  // Authentication
+  // --------------------------------------------------
+
+  if (!user) {
+    return (
+      <AuthView
+        register={register}
+        onLogin={(email, password) => {
+          const found = storage
+            .users()
+            .find((item) => item.email === email && item.password === password);
+
+          if (found) {
+            storage.saveCurrentUser(found);
+            setUser(found);
+
+            setProjects(storage.projects(found.id));
+          } else {
+            window.alert('Invalid email or password');
+          }
+        }}
+        onRegister={(name, email, password) => {
+          if (storage.users().some((item) => item.email === email)) {
+            return window.alert('Email already registered');
+          }
+
+          const created: User = {
+            id: `u_${Date.now()}`,
+            name,
+            email,
+            password,
+          };
+
+          storage.saveUsers([...storage.users(), created]);
+
+          storage.saveCurrentUser(created);
+
+          setUser(created);
+          setProjects([]);
+        }}
+      />
+    );
+  }
+
+  // --------------------------------------------------
+  // Main application
+  // --------------------------------------------------
+
+  return (
+    <div className="app-shell">
+      <Sidebar
+        user={user}
+        view={ui.view}
+        open={ui.sidebarOpen}
+        onToggle={() => updateUI({ sidebarOpen: false })}
+        onNavigate={(next) =>
+          updateUI({
+            view: next,
+            projectId: next === 'project-detail' ? ui.projectId : undefined,
+            sidebarOpen: false,
+          })
+        }
+        onLogout={() => {
+          storage.saveCurrentUser(null);
+          setUser(null);
+          setProjects([]);
+          setUI(initialUIState);
+        }}
+      />
+
+      <div className="app-content">
+        <Header
+          title={title}
+          onMenu={() => updateUI({ sidebarOpen: true })}
+          onAdd={ui.view === 'projects' ? openNewProject : undefined}
+        />
+
+        <main>
+          {ui.view === 'dashboard' && (
+            <Dashboard
+              projects={projects}
+              receiptCount={(id) => storage.receipts(user.id, id).length}
+              onProject={openProject}
+              onAdd={openNewProject}
+              onProjects={() =>
+                updateUI({
+                  view: 'projects',
+                  projectId: undefined,
+                })
+              }
+            />
+          )}
+
+          {ui.view === 'projects' && (
+            <ProjectsView
+              projects={projects}
+              filter={ui.filter}
+              search={ui.search}
+              onFilter={(filter) => updateUI({ filter })}
+              onSearch={(search) => updateUI({ search })}
+              receiptCount={(id) => storage.receipts(user.id, id).length}
+              spent={(id) =>
+                storage.receipts(user.id, id).reduce((sum, receipt) => sum + receipt.amount, 0)
+              }
+              onProject={openProject}
+              onAdd={openNewProject}
+            />
+          )}
+
+          {ui.view === 'project-detail' && selected && (
+            <ProjectDetail
+              project={selected}
+              receipts={receipts}
+              onBack={() =>
+                updateUI({
+                  view: 'projects',
+                  projectId: undefined,
+                })
+              }
+              onEdit={() =>
+                updateUI({
+                  modal: {
+                    type: 'project',
+                    projectId: selected.id,
+                  },
+                })
+              }
+              onDelete={deleteProject}
+              onAddReceipt={() =>
+                updateUI({
+                  modal: { type: 'receipt' },
+                })
+              }
+              onReceipt={(receipt) =>
+                updateUI({
+                  modal: {
+                    type: 'view-receipt',
+                    receiptId: receipt.id,
+                  },
+                })
+              }
+            />
+          )}
+        </main>
+      </div>
+
+      {ui.modal?.type === 'project' && (
+        <ProjectForm project={editing} onSubmit={saveProject} onClose={closeModal} />
+      )}
+
+      {ui.modal?.type === 'receipt' && <ReceiptForm onSubmit={addReceipt} onClose={closeModal} />}
+
+      {ui.modal?.type === 'view-receipt' && viewingReceipt && (
+        <ReceiptView receipt={viewingReceipt} onClose={closeModal} onDelete={deleteReceipt} />
+      )}
+    </div>
+  );
 }
 
 export default App;
