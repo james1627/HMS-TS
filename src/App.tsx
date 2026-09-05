@@ -1,35 +1,17 @@
 import './index.css';
 import { useState } from 'react';
-import {
-  AuthView,
-  Dashboard,
-  Header,
-  ProjectDetail,
-  ProjectForm,
-  ProjectsView,
-  ReceiptForm,
-  ReceiptView,
-  Sidebar,
-} from './components/ProjectVault';
+import Sidebar from './components/Sidebar';
+import Header from './components/Header';
+import AuthView from './components/AuthView';
 import { seedDemoUser, storage } from './storage';
-import type { Project, ProjectStatus, Receipt, User } from './types';
-
-type View = 'dashboard' | 'projects' | 'project-detail';
-
-type Modal =
-  | null
-  | { type: 'project'; projectId?: string }
-  | { type: 'receipt' }
-  | { type: 'view-receipt'; receiptId: string };
-
-type UIState = {
-  view: View;
-  projectId?: string;
-  modal: Modal;
-  filter: ProjectStatus | 'all';
-  search: string;
-  sidebarOpen: boolean;
-};
+import type { Project, Receipt, User } from './types';
+import type UIState from './UIState';
+import Dashboard from './components/Dashboard';
+import ProjectDetail from './components/Project/ProjectDetail';
+import { ProjectForm } from './components/Project/ProjectForm';
+import { ProjectsView } from './components/Project/ProjectsView';
+import { ReceiptForm } from './components/Receipt/ReceiptForm';
+import { ReceiptView } from './components/Receipt/ReceiptView';
 
 const initialUIState: UIState = {
   view: 'dashboard',
